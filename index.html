@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AI-BL Controle de Ponto</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -34,13 +34,15 @@
         .custom-shadow { box-shadow: 0 10px 40px -10px rgba(0,0,0,0.05); }
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #CCFF00; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // COLE A SUA URL AQUI DENTRO DAS ASPAS:
+        // Link do Apps Script já configurado
         const API_URL = 'https://script.google.com/macros/s/AKfycby24lusY9oF4rVcXQxy--TNELp-npdypIpPyCWrImA1iyZ0lO02uV7TUHSPFTQ69gjhhg/exec';
 
         const timeToMinutes = (timeStr) => {
@@ -116,7 +118,7 @@
                 });
                 return () => { if (chartInstance.current) chartInstance.current.destroy(); };
             }, [data]);
-            return <div className="relative h-72 w-full"><canvas ref={chartRef}></canvas></div>;
+            return <div className="relative h-64 md:h-72 w-full"><canvas ref={chartRef}></canvas></div>;
         };
 
         const App = () => {
@@ -131,7 +133,6 @@
                 date: '', ent1: '', sai1: '', ent2: '', sai2: '', target: '09:00', note: ''
             });
 
-            // Carrega os dados da Planilha
             React.useEffect(() => {
                 fetch(API_URL)
                     .then(res => res.json())
@@ -142,7 +143,7 @@
                     .catch(err => {
                         console.error("Erro na API:", err);
                         setLoading(false);
-                        alert("Certifique-se de colar a URL gerada do Apps Script no código.");
+                        alert("Erro ao conectar com a planilha.");
                     });
             }, []);
 
@@ -157,14 +158,12 @@
 
                 const recordToSave = { ...newRecord, target: tgt, id: editingId || Date.now().toString() };
 
-                // Atualiza visualmente na hora
                 if (editingId) {
                     setRecords(records.map(r => r.id === editingId ? recordToSave : r));
                 } else {
                     setRecords([...records, recordToSave]);
                 }
 
-                // Manda para a planilha
                 fetch(`${API_URL}?action=save`, {
                     redirect: "follow",
                     method: 'POST',
@@ -216,8 +215,9 @@
                 );
             }
 
-            let totalBalanceMinutes = 0;
+            let totalBalanceDMinus1 = 0;
             let runningTotal = 0;
+            const todayStr = getTodayDateStr();
             
             const processedRecords = records.map(rec => {
                 let workedMins = 0;
@@ -227,7 +227,10 @@
                 const targetMins = timeToMinutes(rec.target);
                 const balanceMins = workedMins > 0 || rec.sai1 ? workedMins - targetMins : 0; 
                 
-                totalBalanceMinutes += balanceMins;
+                if (rec.date < todayStr) {
+                    totalBalanceDMinus1 += balanceMins;
+                }
+                
                 runningTotal += balanceMins;
 
                 let expectedExit = null;
@@ -237,16 +240,15 @@
                         expectedExit = minutesToTime(timeToMinutes(rec.ent2) + minsLeft);
                     } else if (rec.sai1) {
                         const minsLeft = targetMins - (timeToMinutes(rec.sai1) - timeToMinutes(rec.ent1));
-                        expectedExit = minutesToTime(timeToMinutes(rec.sai1) + 60 + minsLeft) + " (+1h almoço est.)";
+                        expectedExit = minutesToTime(timeToMinutes(rec.sai1) + 60 + minsLeft) + " (+1h almoço)";
                     } else {
-                        expectedExit = minutesToTime(timeToMinutes(rec.ent1) + targetMins + 60) + " (+1h almoço est.)";
+                        expectedExit = minutesToTime(timeToMinutes(rec.ent1) + targetMins + 60) + " (+1h almoço)";
                     }
                 }
 
                 return { ...rec, workedMins, workedStr: minutesToTime(workedMins), balanceMins, balanceStr: minutesToTime(balanceMins), cumulativeMins: runningTotal, expectedExit };
             }).sort((a, b) => new Date(a.date) - new Date(b.date));
 
-            const todayStr = getTodayDateStr();
             const todayRecord = processedRecords.find(r => r.date === todayStr);
 
             const currentPeriodRecords = processedRecords.filter(rec => {
@@ -282,22 +284,22 @@
                 divida: ((rec.cumulativeMins * -1) / 60).toFixed(2)
             }));
 
-            const balanceIsPositive = totalBalanceMinutes >= 0;
-            const totalHoursStr = minutesToTime(Math.abs(totalBalanceMinutes));
+            const balanceIsPositive = totalBalanceDMinus1 >= 0;
+            const totalHoursStr = minutesToTime(Math.abs(totalBalanceDMinus1));
             
-            let compMsg = "O teu saldo global está positivo. Excelente trabalho!";
+            let compMsg = "O teu saldo global (D-1) está positivo. Excelente trabalho!";
             if (!balanceIsPositive) {
-                const minsPerDay = Math.ceil(Math.abs(totalBalanceMinutes) / 22);
-                compMsg = `Para zerar as tuas horas devidas no próximo mês (22 dias úteis), precisas de fazer ${Math.floor(minsPerDay/60)}h ${String(minsPerDay%60).padStart(2, '0')}m extra por dia.`;
+                const minsPerDay = Math.ceil(Math.abs(totalBalanceDMinus1) / 22);
+                compMsg = `Para zerar as tuas horas devidas no próximo mês (22 dias), precisas de fazer ${Math.floor(minsPerDay/60)}h ${String(minsPerDay%60).padStart(2, '0')}m extra por dia.`;
             }
 
             return (
-                <div className="min-h-screen flex text-darkText font-sans">
-                    <div className="w-20 bg-white border-r border-gray-100 flex flex-col items-center py-6 gap-8 shadow-sm z-10">
-                        <div className="w-10 h-10 rounded-full bg-darkText text-neon flex items-center justify-center font-bold text-xl cursor-pointer" onClick={() => setActiveTab('dashboard')}>
+                <div className="min-h-screen flex flex-col md:flex-row text-darkText font-sans bg-lightGray relative">
+                    <div className="fixed bottom-0 left-0 right-0 md:relative md:w-20 bg-white border-t md:border-t-0 md:border-r border-gray-100 flex flex-row md:flex-col items-center justify-around md:justify-start py-3 md:py-6 px-4 md:px-0 gap-2 md:gap-8 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] md:shadow-sm z-50">
+                        <div className="hidden md:flex w-10 h-10 rounded-full bg-darkText text-neon items-center justify-center font-bold text-xl cursor-pointer" onClick={() => setActiveTab('dashboard')}>
                             <i className="ph-fill ph-asterisk"></i>
                         </div>
-                        <div className="flex flex-col gap-6 mt-4">
+                        <div className="flex flex-row md:flex-col gap-6 w-full justify-around md:w-auto md:mt-4">
                             <button onClick={() => setActiveTab('dashboard')} className={`w-12 h-12 rounded-full flex items-center justify-center transition custom-shadow ${activeTab === 'dashboard' ? 'bg-neon text-darkText' : 'text-gray-400 hover:bg-gray-50'}`}>
                                 <i className="ph ph-clock text-2xl"></i>
                             </button>
@@ -310,18 +312,18 @@
                         </div>
                     </div>
 
-                    <div className="flex-1 p-10 overflow-y-auto">
-                        <div className="flex justify-between items-center mb-10">
+                    <div className="flex-1 p-4 md:p-10 pb-24 md:pb-10 overflow-y-auto w-full max-w-[100vw]">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 md:mb-10 gap-4">
                             <div>
-                                <h1 className="text-4xl font-bold tracking-tight">Controle de Ponto</h1>
-                                <div className="text-gray-500 mt-1 flex items-center gap-2">
+                                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Controle de Ponto</h1>
+                                <div className="text-gray-500 mt-1 flex items-center gap-2 text-sm md:text-base">
                                     <span className="w-2 h-2 rounded-full bg-neon inline-block"></span>
                                     {activeTab === 'dashboard' && 'Dashboard Operacional'}
                                     {activeTab === 'calendar' && 'Gestão de Períodos'}
                                     {activeTab === 'chart' && 'Análise de Dívida de Horas'}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-4 bg-white p-2 pr-6 rounded-full custom-shadow">
+                            <div className="flex items-center gap-4 bg-white p-2 pr-6 rounded-full custom-shadow w-full sm:w-auto">
                                 <img src="https://ui-avatars.com/api/?name=Mikael+Marques&background=E5E7EB&color=1A1A1A" alt="Profile" className="w-10 h-10 rounded-full" />
                                 <div>
                                     <p className="text-sm font-semibold">Mikael Marques</p>
@@ -331,29 +333,29 @@
                         </div>
 
                         {activeTab === 'dashboard' && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                                <div className="bg-white rounded-3xl p-6 custom-shadow flex flex-col justify-between relative overflow-hidden">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                                <div className="bg-white rounded-3xl p-5 md:p-6 custom-shadow flex flex-col justify-between relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-32 h-32 bg-neon opacity-20 blur-3xl rounded-full -mr-10 -mt-10"></div>
                                     <div className="flex justify-between items-start mb-4">
                                         <div className="flex items-center gap-2 text-sm font-semibold">
                                             <div className={`w-3 h-3 rounded-full ${balanceIsPositive ? 'bg-neon' : 'bg-danger'}`}></div>
-                                            Saldo Total Acumulado
+                                            Saldo Total (D-1)
                                         </div>
                                         <i className="ph ph-scales text-gray-400 text-xl"></i>
                                     </div>
                                     <div>
-                                        <h2 className={`text-5xl font-bold tracking-tighter ${balanceIsPositive ? 'text-darkText' : 'text-danger'}`}>
+                                        <h2 className={`text-4xl md:text-5xl font-bold tracking-tighter ${balanceIsPositive ? 'text-darkText' : 'text-danger'}`}>
                                             {balanceIsPositive ? '+' : '-'}{totalHoursStr}
                                         </h2>
-                                        <p className="text-sm text-gray-500 mt-2">
-                                            {balanceIsPositive ? 'Horas positivas acumuladas' : 'Total de horas devidas'}
+                                        <p className="text-xs md:text-sm text-gray-500 mt-2 leading-tight">
+                                            {balanceIsPositive ? 'Horas positivas acumuladas até ontem.' : 'Total de horas devidas até ontem.'}
                                         </p>
                                     </div>
                                 </div>
 
-                                <div className="bg-darkText text-white rounded-3xl p-6 custom-shadow flex flex-col justify-between relative">
+                                <div className="bg-darkText text-white rounded-3xl p-5 md:p-6 custom-shadow flex flex-col justify-between relative">
                                     <div className="absolute bottom-0 right-0 p-4">
-                                        <i className="ph-fill ph-bell-ringing text-neon opacity-20 text-6xl"></i>
+                                        <i className="ph-fill ph-bell-ringing text-neon opacity-20 text-5xl md:text-6xl"></i>
                                     </div>
                                     <div className="flex justify-between items-start mb-4">
                                         <div className="flex items-center gap-2 text-sm font-semibold text-neon">
@@ -361,21 +363,21 @@
                                         </div>
                                     </div>
                                     <div className="z-10">
-                                        <h3 className="text-2xl font-bold mb-2">Previsão de Saída</h3>
+                                        <h3 className="text-xl md:text-2xl font-bold mb-2">Previsão de Saída</h3>
                                         {todayRecord && todayRecord.expectedExit ? (
                                             <div>
-                                                <p className="text-neon text-4xl font-black mb-1">{todayRecord.expectedExit.split(' ')[0]}</p>
+                                                <p className="text-neon text-4xl md:text-5xl font-black mb-1">{todayRecord.expectedExit.split(' ')[0]}</p>
                                                 <p className="text-gray-400 text-xs mt-2">Hora prevista baseada nos seus lançamentos de hoje.</p>
                                             </div>
                                         ) : (
                                             <p className="text-gray-300 text-sm">
-                                                Nenhum registo de entrada encontrado para hoje ({new Date().toLocaleDateString('pt-BR')}). Adicione no quadro ao lado.
+                                                Nenhum registo de entrada encontrado para hoje ({new Date().toLocaleDateString('pt-BR')}).
                                             </p>
                                         )}
                                     </div>
                                 </div>
 
-                                <div className={`rounded-3xl p-6 custom-shadow flex flex-col justify-between transition-colors ${editingId ? 'bg-gray-800 text-white' : 'bg-neon text-darkText'}`}>
+                                <div className={`rounded-3xl p-5 md:p-6 custom-shadow flex flex-col justify-between transition-colors ${editingId ? 'bg-gray-800 text-white' : 'bg-neon text-darkText'}`}>
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2 text-sm font-bold">
                                             {editingId ? 'Editar Registo' : 'Registo Rápido'}
@@ -384,20 +386,20 @@
                                         {editingId ? <i className="ph ph-pencil-simple text-2xl text-neon"></i> : <i className="ph ph-plus-circle text-2xl"></i>}
                                     </div>
                                     <form onSubmit={handleAddOrUpdate} className="flex flex-col gap-2 mt-2">
-                                        <div className="flex gap-2">
-                                            <input type="date" required value={newRecord.date} onChange={e => setNewRecord({...newRecord, date: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
-                                            <input type="time" placeholder="Ent 1" value={newRecord.ent1} onChange={e => setNewRecord({...newRecord, ent1: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                            <input type="date" required value={newRecord.date} onChange={e => setNewRecord({...newRecord, date: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
+                                            <input type="time" placeholder="Ent 1" value={newRecord.ent1} onChange={e => setNewRecord({...newRecord, ent1: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
                                         </div>
                                         <div className="flex gap-2">
-                                            <input type="time" placeholder="Sai 1" value={newRecord.sai1} onChange={e => setNewRecord({...newRecord, sai1: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none" />
-                                            <input type="time" placeholder="Ent 2" value={newRecord.ent2} onChange={e => setNewRecord({...newRecord, ent2: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none" />
-                                            <input type="time" placeholder="Sai 2" value={newRecord.sai2} onChange={e => setNewRecord({...newRecord, sai2: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none" />
+                                            <input type="time" placeholder="Sai 1" value={newRecord.sai1} onChange={e => setNewRecord({...newRecord, sai1: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none" />
+                                            <input type="time" placeholder="Ent 2" value={newRecord.ent2} onChange={e => setNewRecord({...newRecord, ent2: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none" />
+                                            <input type="time" placeholder="Sai 2" value={newRecord.sai2} onChange={e => setNewRecord({...newRecord, sai2: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none" />
                                         </div>
                                         <div className="flex gap-2">
-                                            <input type="text" placeholder="Anotações do dia (opcional)..." value={newRecord.note} onChange={e => setNewRecord({...newRecord, note: e.target.value})} className="bg-white/90 text-darkText p-2 rounded-xl text-xs w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
+                                            <input type="text" placeholder="Anotações do dia (opcional)..." value={newRecord.note} onChange={e => setNewRecord({...newRecord, note: e.target.value})} className="bg-white/90 text-darkText p-2 md:p-3 rounded-xl text-xs md:text-sm w-full font-semibold focus:outline-none focus:ring-2 focus:ring-darkText" />
                                         </div>
                                         <div className="flex gap-2 mt-1">
-                                            <button type="submit" disabled={syncing} className={`rounded-xl py-2 text-sm font-semibold flex-1 transition ${editingId ? 'bg-neon text-darkText hover:bg-neonDark' : 'bg-darkText text-white hover:bg-gray-800'} ${syncing ? 'opacity-50' : ''}`}>
+                                            <button type="submit" disabled={syncing} className={`rounded-xl py-2 md:py-3 text-sm font-semibold flex-1 transition ${editingId ? 'bg-neon text-darkText hover:bg-neonDark' : 'bg-darkText text-white hover:bg-gray-800'} ${syncing ? 'opacity-50' : ''}`}>
                                                 {editingId ? 'Atualizar' : 'Adicionar'}
                                             </button>
                                             {editingId && (
@@ -413,47 +415,45 @@
 
                         {activeTab === 'calendar' && (
                             <div className="mb-8">
-                                <div className="bg-white rounded-3xl p-6 custom-shadow mb-6">
-                                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <div className="bg-white rounded-3xl p-5 md:p-6 custom-shadow mb-6">
+                                    <h3 className="text-lg md:text-xl font-bold mb-4 flex items-center gap-2">
                                         <i className="ph ph-calendar text-neon text-2xl"></i>
                                         Selecionar Período
                                     </h3>
-                                    <div className="flex items-center gap-4">
-                                        <div className="flex flex-col">
+                                    <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-4">
+                                        <div className="flex flex-col flex-1">
                                             <label className="text-xs text-gray-500 mb-1 font-semibold">Data Inicial</label>
-                                            <input type="date" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} className="bg-lightGray p-3 rounded-xl border border-gray-200 focus:outline-none focus:border-neon" />
+                                            <input type="date" value={dateFilter.start} onChange={e => setDateFilter({...dateFilter, start: e.target.value})} className="bg-lightGray p-3 rounded-xl border border-gray-200 focus:outline-none focus:border-neon w-full" />
                                         </div>
-                                        <div className="flex flex-col">
+                                        <div className="flex flex-col flex-1">
                                             <label className="text-xs text-gray-500 mb-1 font-semibold">Data Final</label>
-                                            <input type="date" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} className="bg-lightGray p-3 rounded-xl border border-gray-200 focus:outline-none focus:border-neon" />
+                                            <input type="date" value={dateFilter.end} onChange={e => setDateFilter({...dateFilter, end: e.target.value})} className="bg-lightGray p-3 rounded-xl border border-gray-200 focus:outline-none focus:border-neon w-full" />
                                         </div>
-                                        <div className="flex flex-col justify-end">
-                                            <button onClick={() => setDateFilter({start: '', end: ''})} className="mt-5 text-sm font-semibold text-gray-500 hover:text-darkText transition">
-                                                Limpar Filtros
-                                            </button>
-                                        </div>
+                                        <button onClick={() => setDateFilter({start: '', end: ''})} className="text-sm font-semibold text-gray-500 hover:text-darkText transition bg-gray-100 p-3 rounded-xl sm:bg-transparent sm:p-0 sm:mb-3">
+                                            Limpar
+                                        </button>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="bg-white rounded-2xl p-6 custom-shadow flex justify-between items-center border-l-4 border-neon">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                                    <div className="bg-white rounded-2xl p-5 md:p-6 custom-shadow flex justify-between items-center border-l-4 border-neon">
                                         <div>
-                                            <p className="text-sm text-gray-500 font-semibold mb-1">Horas Trabalhadas no Período</p>
-                                            <h4 className="text-4xl font-bold">{periodWorkedStr}</h4>
+                                            <p className="text-xs md:text-sm text-gray-500 font-semibold mb-1">Horas Trabalhadas (Período)</p>
+                                            <h4 className="text-3xl md:text-4xl font-bold">{periodWorkedStr}</h4>
                                         </div>
-                                        <div className="w-14 h-14 rounded-full bg-lightGray flex items-center justify-center">
-                                            <i className="ph ph-briefcase text-2xl text-darkText"></i>
+                                        <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-lightGray flex items-center justify-center">
+                                            <i className="ph ph-briefcase text-xl md:text-2xl text-darkText"></i>
                                         </div>
                                     </div>
-                                    <div className={`bg-white rounded-2xl p-6 custom-shadow flex justify-between items-center border-l-4 ${periodIsPositive ? 'border-neon' : 'border-danger'}`}>
+                                    <div className={`bg-white rounded-2xl p-5 md:p-6 custom-shadow flex justify-between items-center border-l-4 ${periodIsPositive ? 'border-neon' : 'border-danger'}`}>
                                         <div>
-                                            <p className="text-sm text-gray-500 font-semibold mb-1">Saldo do Período</p>
-                                            <h4 className={`text-4xl font-bold ${periodIsPositive ? 'text-green-600' : 'text-danger'}`}>
+                                            <p className="text-xs md:text-sm text-gray-500 font-semibold mb-1">Saldo do Período</p>
+                                            <h4 className={`text-3xl md:text-4xl font-bold ${periodIsPositive ? 'text-green-600' : 'text-danger'}`}>
                                                 {periodIsPositive ? '+' : '-'}{periodBalanceStr}
                                             </h4>
                                         </div>
-                                        <div className="w-14 h-14 rounded-full bg-lightGray flex items-center justify-center">
-                                            <i className="ph ph-scales text-2xl text-darkText"></i>
+                                        <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-lightGray flex items-center justify-center">
+                                            <i className="ph ph-scales text-xl md:text-2xl text-darkText"></i>
                                         </div>
                                     </div>
                                 </div>
@@ -461,15 +461,15 @@
                         )}
 
                         {activeTab === 'chart' && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                                <div className="md:col-span-2 bg-white rounded-3xl p-6 custom-shadow">
-                                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                                <div className="lg:col-span-2 bg-white rounded-3xl p-5 md:p-6 custom-shadow">
+                                    <h3 className="text-lg md:text-xl font-bold mb-4 flex items-center gap-2">
                                         <i className="ph ph-trend-up text-danger text-2xl"></i>
                                         Crescimento de Horas Negativas
                                     </h3>
                                     <GrowthChart data={chartData} />
                                 </div>
-                                <div className="bg-darkText text-white rounded-3xl p-6 custom-shadow flex flex-col justify-center relative overflow-hidden">
+                                <div className="bg-darkText text-white rounded-3xl p-5 md:p-6 custom-shadow flex flex-col justify-center relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-32 h-32 bg-neon opacity-10 blur-3xl rounded-full -mr-10 -mt-10"></div>
                                     <h3 className="text-xl font-bold text-neon mb-4">Meta de Compensação</h3>
                                     <p className="text-gray-300 text-sm mb-6 leading-relaxed">
@@ -477,8 +477,8 @@
                                     </p>
                                     {!balanceIsPositive && (
                                         <div className="bg-white/10 p-4 rounded-xl border border-white/20">
-                                            <p className="text-xs text-gray-400 uppercase tracking-widest font-bold mb-1">Défice Atual Global</p>
-                                            <p className="text-2xl font-bold text-danger">{totalHoursStr} horas devidas</p>
+                                            <p className="text-[10px] md:text-xs text-gray-400 uppercase tracking-widest font-bold mb-1">Défice Atual (D-1)</p>
+                                            <p className="text-xl md:text-2xl font-bold text-danger">{totalHoursStr} horas devidas</p>
                                         </div>
                                     )}
                                 </div>
@@ -486,39 +486,42 @@
                         )}
 
                         {(activeTab === 'dashboard' || activeTab === 'calendar') && (
-                            <div className="bg-white rounded-3xl p-6 custom-shadow">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h3 className="text-xl font-bold flex items-center gap-2">
-                                        <span className="w-3 h-3 rounded-sm bg-neon inline-block"></span>
+                            <div className="bg-white rounded-3xl p-4 md:p-6 custom-shadow w-full overflow-hidden">
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 md:mb-6 gap-2">
+                                    <h3 className="text-lg md:text-xl font-bold flex items-center gap-2">
+                                        <span className="w-3 h-3 rounded-sm bg-neon inline-block min-w-[12px]"></span>
                                         Histórico de Registos 
-                                        {activeTab === 'dashboard' && <span className="text-sm font-normal text-gray-500 ml-2">(Período Atual: {getCurrentPeriodLabel()})</span>}
-                                        {activeTab === 'calendar' && (dateFilter.start || dateFilter.end) && <span className="text-sm font-normal text-gray-500 ml-2">(Filtrado)</span>}
                                     </h3>
+                                    <span className="text-xs md:text-sm font-normal text-gray-500 bg-lightGray px-3 py-1 rounded-full w-fit">
+                                        {activeTab === 'dashboard' && `Período Atual: ${getCurrentPeriodLabel()}`}
+                                        {activeTab === 'calendar' && (dateFilter.start || dateFilter.end) && 'Resultados Filtrados'}
+                                        {activeTab === 'calendar' && !dateFilter.start && !dateFilter.end && 'Todos os Registos'}
+                                    </span>
                                 </div>
                                 
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm text-left">
-                                        <thead className="text-xs text-gray-500 uppercase bg-lightGray rounded-xl">
+                                <div className="overflow-x-auto no-scrollbar w-full border border-gray-50 rounded-xl">
+                                    <table className="w-full text-xs md:text-sm text-left whitespace-nowrap">
+                                        <thead className="text-gray-500 uppercase bg-lightGray">
                                             <tr>
-                                                <th className="px-4 py-3 rounded-l-xl">Data</th>
-                                                <th className="px-4 py-3">Entrada 1</th>
-                                                <th className="px-4 py-3">Saída 1</th>
-                                                <th className="px-4 py-3">Entrada 2</th>
-                                                <th className="px-4 py-3">Saída 2</th>
-                                                <th className="px-4 py-3">Carga</th>
-                                                <th className="px-4 py-3">Trabalhado</th>
-                                                <th className="px-4 py-3">Previsão</th>
-                                                <th className="px-4 py-3">Saldo</th>
-                                                <th className="px-4 py-3">Anotações</th>
-                                                <th className="px-4 py-3 rounded-r-xl text-center">Ações</th>
+                                                <th className="px-4 py-3 md:py-4 rounded-tl-xl">Data</th>
+                                                <th className="px-4 py-3 md:py-4">Ent 1</th>
+                                                <th className="px-4 py-3 md:py-4">Sai 1</th>
+                                                <th className="px-4 py-3 md:py-4">Ent 2</th>
+                                                <th className="px-4 py-3 md:py-4">Sai 2</th>
+                                                <th className="px-4 py-3 md:py-4">Carga</th>
+                                                <th className="px-4 py-3 md:py-4">Trabalhado</th>
+                                                <th className="px-4 py-3 md:py-4">Previsão</th>
+                                                <th className="px-4 py-3 md:py-4">Saldo</th>
+                                                <th className="px-4 py-3 md:py-4">Anotações</th>
+                                                <th className="px-4 py-3 md:py-4 rounded-tr-xl text-center">Ações</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {displayedRecords.map((rec, idx) => (
-                                                <tr key={rec.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition">
-                                                    <td className="px-4 py-3 font-semibold whitespace-nowrap">
-                                                        {new Date(rec.date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                                                        <span className="text-gray-400 ml-2 text-xs uppercase">
+                                                <tr key={rec.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition">
+                                                    <td className="px-4 py-3 font-semibold text-gray-800">
+                                                        {new Date(rec.date + 'T00:00:00').toLocaleDateString('pt-BR').substring(0,5)}
+                                                        <span className="text-gray-400 ml-2 text-[10px] md:text-xs uppercase hidden sm:inline">
                                                             {new Date(rec.date + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.','')}
                                                         </span>
                                                     </td>
@@ -527,14 +530,12 @@
                                                     <td className="px-4 py-3 text-gray-600">{rec.ent2 || '-'}</td>
                                                     <td className="px-4 py-3 text-gray-600">{rec.sai2 || '-'}</td>
                                                     <td className="px-4 py-3 font-medium text-gray-500">{rec.target}</td>
-                                                    <td className="px-4 py-3 font-semibold">{rec.workedStr}</td>
-                                                    <td className="px-4 py-3 text-xs text-gray-500">
-                                                        {rec.expectedExit ? (
-                                                            <span className="bg-gray-100 px-2 py-1 rounded-md text-nowrap">{rec.expectedExit}</span>
-                                                        ) : '-'}
+                                                    <td className="px-4 py-3 font-semibold text-darkText">{rec.workedStr}</td>
+                                                    <td className="px-4 py-3 text-[10px] md:text-xs text-gray-500">
+                                                        {rec.expectedExit ? <span className="bg-gray-100 px-2 py-1 rounded-md">{rec.expectedExit}</span> : '-'}
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <span className={`px-2 py-1 rounded-md font-bold text-xs ${
+                                                        <span className={`px-2 py-1 rounded-md font-bold text-[10px] md:text-xs ${
                                                             rec.balanceMins > 0 ? 'bg-neon/20 text-green-700' : 
                                                             rec.balanceMins < 0 ? 'bg-red-100 text-danger' : 
                                                             'bg-gray-100 text-gray-600'
@@ -542,24 +543,24 @@
                                                             {rec.balanceMins > 0 ? '+' : ''}{rec.balanceStr}
                                                         </span>
                                                     </td>
-                                                    <td className="px-4 py-3 text-gray-500 text-xs truncate max-w-[150px]" title={rec.note}>
+                                                    <td className="px-4 py-3 text-gray-500 text-[10px] md:text-xs truncate max-w-[100px] md:max-w-[150px]" title={rec.note}>
                                                         {rec.note || '-'}
                                                     </td>
                                                     <td className="px-4 py-3 text-center flex justify-center gap-3">
-                                                        <button onClick={() => { setActiveTab('dashboard'); handleEditClick(rec); }} className="text-gray-400 hover:text-darkText transition" title="Editar">
-                                                            <i className="ph ph-pencil-simple text-lg"></i>
+                                                        <button onClick={() => { setActiveTab('dashboard'); handleEditClick(rec); }} className="text-gray-400 hover:text-darkText transition bg-white p-1 rounded-md border border-gray-100" title="Editar">
+                                                            <i className="ph ph-pencil-simple text-base md:text-lg"></i>
                                                         </button>
-                                                        <button onClick={() => handleDeleteClick(rec.id)} className="text-gray-400 hover:text-danger transition" title="Excluir">
-                                                            <i className="ph ph-trash text-lg"></i>
+                                                        <button onClick={() => handleDeleteClick(rec.id)} className="text-gray-400 hover:text-danger transition bg-white p-1 rounded-md border border-gray-100" title="Excluir">
+                                                            <i className="ph ph-trash text-base md:text-lg"></i>
                                                         </button>
                                                     </td>
                                                 </tr>
                                             ))}
                                             {displayedRecords.length === 0 && (
                                                 <tr>
-                                                    <td colSpan="11" className="text-center py-8 text-gray-500">
-                                                        Nenhum registo encontrado para este período.<br/>
-                                                        {activeTab === 'dashboard' && <span className="text-xs">Utilize o quadro de Registo Rápido acima para adicionar dias.</span>}
+                                                    <td colSpan="11" className="text-center py-8 text-gray-500 text-sm">
+                                                        Nenhum registo encontrado.<br/>
+                                                        {activeTab === 'dashboard' && <span className="text-xs">Utilize o Registo Rápido acima para adicionar dias.</span>}
                                                     </td>
                                                 </tr>
                                             )}
