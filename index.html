@@ -42,8 +42,13 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // Link do Apps Script já configurado
+        // Link do Apps Script
         const API_URL = 'https://script.google.com/macros/s/AKfycby24lusY9oF4rVcXQxy--TNELp-npdypIpPyCWrImA1iyZ0lO02uV7TUHSPFTQ69gjhhg/exec';
+        
+        // ==========================================
+        // DEFINA A SUA SENHA AQUI:
+        // ==========================================
+        const SENHA_DE_ACESSO = 'mikael2026';
 
         const timeToMinutes = (timeStr) => {
             if (!timeStr) return 0;
@@ -122,6 +127,11 @@
         };
 
         const App = () => {
+            // Estados de Autenticação
+            const [isAuthenticated, setIsAuthenticated] = React.useState(false);
+            const [passwordInput, setPasswordInput] = React.useState('');
+            const [loginError, setLoginError] = React.useState('');
+
             const [records, setRecords] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
             const [syncing, setSyncing] = React.useState(false);
@@ -133,19 +143,32 @@
                 date: '', ent1: '', sai1: '', ent2: '', sai2: '', target: '09:00', note: ''
             });
 
+            // O fetch só acontece DEPOIS que o usuário faz login
             React.useEffect(() => {
-                fetch(API_URL)
-                    .then(res => res.json())
-                    .then(data => {
-                        setRecords(data);
-                        setLoading(false);
-                    })
-                    .catch(err => {
-                        console.error("Erro na API:", err);
-                        setLoading(false);
-                        alert("Erro ao conectar com a planilha.");
-                    });
-            }, []);
+                if (isAuthenticated) {
+                    fetch(API_URL)
+                        .then(res => res.json())
+                        .then(data => {
+                            setRecords(data);
+                            setLoading(false);
+                        })
+                        .catch(err => {
+                            console.error("Erro na API:", err);
+                            setLoading(false);
+                            alert("Erro ao conectar com a planilha.");
+                        });
+                }
+            }, [isAuthenticated]);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (passwordInput === SENHA_DE_ACESSO) {
+                    setIsAuthenticated(true);
+                    setLoginError('');
+                } else {
+                    setLoginError('Senha incorreta. Tente novamente.');
+                }
+            };
 
             const handleAddOrUpdate = (e) => {
                 e.preventDefault();
@@ -205,6 +228,40 @@
                     }).then(() => setSyncing(false)).catch(e => setSyncing(false));
                 }
             };
+
+            // TELA DE LOGIN (Mostrada se não estiver autenticado)
+            if (!isAuthenticated) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-lightGray p-4">
+                        <div className="bg-white p-8 md:p-10 rounded-3xl custom-shadow max-w-sm w-full relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-neon opacity-20 blur-3xl rounded-full -mr-10 -mt-10"></div>
+                            <div className="text-center mb-8 z-10 relative">
+                                <div className="w-16 h-16 bg-darkText text-neon rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow-lg">
+                                    <i className="ph-fill ph-lock-key"></i>
+                                </div>
+                                <h2 className="text-2xl font-bold text-darkText tracking-tight">Acesso Restrito</h2>
+                                <p className="text-gray-500 text-sm mt-2">Insira a sua senha para aceder ao sistema</p>
+                            </div>
+                            
+                            <form onSubmit={handleLogin} className="flex flex-col gap-4 relative z-10">
+                                <div>
+                                    <input
+                                        type="password"
+                                        value={passwordInput}
+                                        onChange={(e) => setPasswordInput(e.target.value)}
+                                        placeholder="Digite a senha..."
+                                        className="w-full bg-lightGray p-4 rounded-2xl border border-gray-200 focus:outline-none focus:border-neon focus:ring-2 focus:ring-neon/50 text-center font-bold text-darkText"
+                                    />
+                                    {loginError && <p className="text-danger text-xs text-center mt-2 font-semibold animate-pulse">{loginError}</p>}
+                                </div>
+                                <button type="submit" className="w-full bg-neon text-darkText font-bold py-4 rounded-2xl hover:bg-neonDark transition custom-shadow flex items-center justify-center gap-2">
+                                    Entrar <i className="ph ph-arrow-right font-bold"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
 
             if (loading) {
                 return (
@@ -308,6 +365,9 @@
                             </button>
                             <button onClick={() => setActiveTab('chart')} className={`w-12 h-12 rounded-full flex items-center justify-center transition custom-shadow ${activeTab === 'chart' ? 'bg-neon text-darkText' : 'text-gray-400 hover:bg-gray-50'}`}>
                                 <i className="ph ph-chart-line-up text-2xl"></i>
+                            </button>
+                            <button onClick={() => { if(confirm("Deseja sair do sistema?")) setIsAuthenticated(false); }} className="w-12 h-12 rounded-full flex items-center justify-center transition custom-shadow text-gray-400 hover:text-danger hover:bg-red-50 mt-auto md:absolute md:bottom-6">
+                                <i className="ph ph-sign-out text-2xl"></i>
                             </button>
                         </div>
                     </div>
